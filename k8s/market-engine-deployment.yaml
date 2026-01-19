@@ -1,0 +1,57 @@
+# Market Engine Kubernetes Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-engine
+  labels:
+    app: market-engine
+    component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: market-engine
+  template:
+    metadata:
+      labels:
+        app: market-engine
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+      containers:
+        - name: market-engine
+          image: DOCKER_IMAGE_MARKET_PLACEHOLDER
+          ports:
+            - containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-engine
+spec:
+  selector:
+    app: market-engine
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
+  type: ClusterIP

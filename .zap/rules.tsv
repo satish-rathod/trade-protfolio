@@ -1,0 +1,8 @@
+# OWASP ZAP Rules Configuration
+# Format: Rule ID	Action (IGNORE/WARN/FAIL)	Description
+10021	WARN	X-Content-Type-Options Header Missing
+10038	WARN	Content Security Policy Header Not Set
+10098	WARN	Cross-Domain Misconfiguration
+10109	WARN	Modern Web Application Detection
+10055	WARN	CSP Policy Misconfiguration
+90033	WARN	Loosely Scoped Cookie

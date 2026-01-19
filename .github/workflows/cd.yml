@@ -1,0 +1,180 @@
+name: CD Pipeline
+
+on:
+  # Trigger after successful CI pipeline completion
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+    branches: [main, master]
+
+  # Manual trigger for deployment
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  DOCKER_IMAGE_BACKEND: ${{ secrets.DOCKERHUB_USERNAME }}/apm-backend
+  DOCKER_IMAGE_MARKET: ${{ secrets.DOCKERHUB_USERNAME }}/apm-market-engine
+
+jobs:
+  # ============================================
+  # Stage 1: Deploy to Kubernetes (Kind Cluster)
+  # WHY: Validate Kubernetes deployment in a real cluster environment
+  # ============================================
+  deploy-to-k8s:
+    name: Deploy to Kubernetes (Kind)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # WHY: Kind creates a lightweight Kubernetes cluster for testing deployments
+      - name: Create Kind Cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: apm-cluster
+          wait: 120s
+
+      - name: Verify Cluster
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      # WHY: Create namespace for application isolation
+      - name: Create Namespace
+        run: |
+          kubectl create namespace apm || true
+          kubectl config set-context --current --namespace=apm
+
+      # WHY: Create secret for pulling images from DockerHub
+      - name: Create DockerHub Secret
+        run: |
+          kubectl create secret docker-registry dockerhub-secret \
+            --docker-server=https://index.docker.io/v1/ \
+            --docker-username=${{ secrets.DOCKERHUB_USERNAME }} \
+            --docker-password=${{ secrets.DOCKERHUB_TOKEN }} \
+            --namespace=apm || true
+
+      # WHY: Replace image placeholders with actual DockerHub images
+      - name: Update Kubernetes Manifests with Image Names
+        run: |
+          sed -i "s|DOCKER_IMAGE_MARKET_PLACEHOLDER|${{ env.DOCKER_IMAGE_MARKET }}:latest|g" k8s/market-engine-deployment.yaml
+          sed -i "s|DOCKER_IMAGE_BACKEND_PLACEHOLDER|${{ env.DOCKER_IMAGE_BACKEND }}:latest|g" k8s/backend-deployment.yaml
+          cat k8s/market-engine-deployment.yaml
+          cat k8s/backend-deployment.yaml
+
+      # WHY: Apply Kubernetes manifests to deploy the application
+      - name: Deploy Market Engine
+        run: kubectl apply -f k8s/market-engine-deployment.yaml -n apm
+
+      - name: Deploy Backend
+        run: kubectl apply -f k8s/backend-deployment.yaml -n apm
+
+      # WHY: Wait for deployments to be ready before testing
+      - name: Wait for Deployments
+        run: |
+          kubectl rollout status deployment/market-engine -n apm --timeout=120s
+          kubectl rollout status deployment/backend -n apm --timeout=120s
+
+      - name: Verify Pods Running
+        run: |
+          kubectl get pods -n apm
+          kubectl get services -n apm
+
+      # WHY: Port-forward to test services from GitHub Actions runner
+      - name: Port Forward and Test Services
+        run: |
+          # Port forward market-engine
+          kubectl port-forward svc/market-engine 5000:5000 -n apm &
+          sleep 5
+
+          # Test market-engine health
+          curl -f http://localhost:5000/health && echo "✅ Market Engine is healthy"
+
+          # Port forward backend
+          kubectl port-forward svc/backend 8080:8080 -n apm &
+          sleep 10
+
+          # Test backend health
+          curl -f http://localhost:8080/api/health && echo "✅ Backend is healthy"
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Kind Cluster | ✅ Created |" >> $GITHUB_STEP_SUMMARY
+          echo "| Market Engine | ✅ Deployed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | ✅ Deployed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Checks | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # Stage 2: DAST Scan (Optional - OWASP ZAP)
+  # WHY: Dynamic Application Security Testing finds runtime vulnerabilities
+  # ============================================
+  dast-scan:
+    name: DAST Scan (OWASP ZAP)
+    runs-on: ubuntu-latest
+    needs: deploy-to-k8s
+    continue-on-error: true # Don't fail pipeline on DAST findings
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # WHY: Start a local instance for DAST scanning
+      - name: Start Application with Docker Compose
+        run: |
+          # Use docker compose for DAST target
+          docker compose up -d market-engine
+          sleep 15
+
+      # WHY: OWASP ZAP performs dynamic security testing on running application
+      - name: Run OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "http://localhost:5000"
+          rules_file_name: ".zap/rules.tsv"
+          cmd_options: "-a"
+        continue-on-error: true
+
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-scan-report
+          path: report_html.html
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down
+
+  # ============================================
+  # Stage 3: Deploy to Render (Optional Production)
+  # WHY: Deploy to actual cloud platform for production use
+  # ============================================
+  deploy-render:
+    name: Deploy to Render (Production)
+    runs-on: ubuntu-latest
+    needs: deploy-to-k8s
+    if: github.event.inputs.environment == 'production' || (github.event_name == 'workflow_run' && github.ref == 'refs/heads/main')
+
+    steps:
+      - name: Trigger Render Deploy Hook
+        run: |
+          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+            curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+            echo "✅ Render deployment triggered"
+          else
+            echo "⚠️ RENDER_DEPLOY_HOOK not configured, skipping production deploy"
+          fi

@@ -5,15 +5,21 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch: # Manual trigger for CI execution
 
 env:
   JAVA_VERSION: "17"
-  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/portfolio-manager
+  PYTHON_VERSION: "3.9"
+  DOCKER_IMAGE_BACKEND: ${{ secrets.DOCKERHUB_USERNAME }}/apm-backend
+  DOCKER_IMAGE_MARKET: ${{ secrets.DOCKERHUB_USERNAME }}/apm-market-engine
 
 jobs:
-  # Stage 1: Lint and Security Scan
-  lint-and-security:
-    name: Lint & Security Analysis
+  # ============================================
+  # Stage 1: Java Backend - Lint & Security
+  # WHY: Enforce coding standards and detect vulnerable dependencies early
+  # ============================================
+  java-lint-security:
+    name: Java Lint & Security (Checkstyle + SCA)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -23,23 +29,78 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: "temurin"
           cache: "maven"
 
-      - name: Run Checkstyle
+      # WHY: Checkstyle enforces consistent coding standards, preventing technical debt
+      - name: Run Checkstyle (Linting)
         run: mvn checkstyle:check
 
+      # WHY: OWASP Dependency Check identifies known vulnerabilities in dependencies (SCA)
       - name: Run OWASP Dependency Check (SCA)
-        run: mvn org.owasp:dependency-check-maven:check
+        run: mvn org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7
         continue-on-error: true
 
-  # Stage 2: CodeQL SAST Analysis
+      - name: Upload Dependency Check Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: backend-java/target/dependency-check-report.html
+
+  # ============================================
+  # Stage 2: Python Market Engine - Lint & Test
+  # WHY: Ensure Python code quality and validate business logic
+  # ============================================
+  python-lint-test:
+    name: Python Lint & Test (Ruff + Pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: market-engine
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: market-engine/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest pytest-cov
+
+      # WHY: Ruff is a fast Python linter that catches code quality issues
+      - name: Run Ruff Linting
+        run: ruff check . --output-format=github
+        continue-on-error: true
+
+      # WHY: Unit tests validate business logic and prevent regressions
+      - name: Run Pytest with Coverage
+        run: pytest test_app.py -v --cov=. --cov-report=xml --cov-report=html
+
+      - name: Upload Python Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage-report
+          path: market-engine/htmlcov/
+
+  # ============================================
+  # Stage 3: CodeQL SAST Analysis
+  # WHY: Static Application Security Testing detects OWASP Top 10 vulnerabilities
+  # ============================================
   codeql-analysis:
-    name: CodeQL SAST
+    name: CodeQL SAST (Security Scanning)
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -50,10 +111,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # WHY: CodeQL analyzes source code to find security vulnerabilities
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: java
+          languages: java, python
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -62,18 +124,24 @@ jobs:
           distribution: "temurin"
           cache: "maven"
 
-      - name: Build for CodeQL
+      - name: Build Java for CodeQL
         working-directory: backend-java
-        run: mvn compile -DskipTests
+        run: mvn compile -DskipTests -B
 
+      # WHY: Analysis results appear in GitHub Security tab for easy tracking
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:java"
 
-  # Stage 3: Unit Tests
-  test:
-    name: Unit Tests
+  # ============================================
+  # Stage 4: Java Unit Tests with Coverage
+  # WHY: Validate business logic and ensure code coverage requirements
+  # ============================================
+  java-test:
+    name: Java Unit Tests (JUnit + JaCoCo)
     runs-on: ubuntu-latest
-    needs: lint-and-security
+    needs: java-lint-security
     defaults:
       run:
         working-directory: backend-java
@@ -82,29 +150,40 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: "temurin"
           cache: "maven"
 
-      - name: Run Unit Tests
-        run: mvn test
+      # WHY: Unit tests prevent regressions and validate business logic
+      - name: Run Unit Tests with Coverage
+        run: mvn test -Dspring.profiles.active=test
 
       - name: Upload Test Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results
+          name: java-test-results
           path: backend-java/target/surefire-reports/
 
-  # Stage 4: Build and Push Docker Image
-  build-and-push:
-    name: Build & Push Docker
+      # WHY: JaCoCo coverage report helps track test coverage metrics
+      - name: Upload JaCoCo Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage-report
+          path: backend-java/target/site/jacoco/
+
+  # ============================================
+  # Stage 5: Build & Push Docker Images
+  # WHY: Package application into container for consistent deployment
+  # ============================================
+  build-push:
+    name: Build & Push Docker Images
     runs-on: ubuntu-latest
-    needs: [test, codeql-analysis]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [java-test, python-lint-test, codeql-analysis]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     steps:
       - name: Checkout Code
@@ -117,12 +196,79 @@ jobs:
           distribution: "temurin"
           cache: "maven"
 
-      - name: Build JAR
+      - name: Build JAR (Skip Tests - Already Passed)
         working-directory: backend-java
-        run: mvn package -DskipTests
+        run: mvn package -DskipTests -B
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # WHY: Authenticate with DockerHub to push images
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # WHY: Build optimized Docker image using multi-stage build
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend-java
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE_BACKEND }}:latest
+            ${{ env.DOCKER_IMAGE_BACKEND }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and Push Market Engine Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./market-engine
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE_MARKET }}:latest
+            ${{ env.DOCKER_IMAGE_MARKET }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # WHY: Trivy scans for OS and library vulnerabilities in container images
+      - name: Run Trivy Scan on Backend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE_BACKEND }}:latest
+          format: "sarif"
+          output: "trivy-backend-results.sarif"
+          severity: "CRITICAL,HIGH"
+
+      - name: Run Trivy Scan on Market Engine Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE_MARKET }}:latest
+          format: "sarif"
+          output: "trivy-market-results.sarif"
+          severity: "CRITICAL,HIGH"
+
+      # WHY: Upload results to GitHub Security tab for visibility
+      - name: Upload Trivy Results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-backend-results.sarif"
+          category: "trivy-backend"
+
+  # ============================================
+  # Stage 6: Container Runtime Test (Smoke Test)
+  # WHY: Validate that container starts and responds to health checks
+  # ============================================
+  container-test:
+    name: Container Runtime Test (Smoke Test)
+    runs-on: ubuntu-latest
+    needs: build-push
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Login to DockerHub
         uses: docker/login-action@v3
@@ -130,35 +276,41 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and Push Backend Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend-java
-          push: true
-          tags: |
-            ${{ env.DOCKER_IMAGE }}:latest
-            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-
-      - name: Run Trivy Image Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.DOCKER_IMAGE }}:latest
-          format: "table"
-          exit-code: "0"
-          severity: "CRITICAL,HIGH"
-
-  # Stage 5: Deploy (Optional - Render Webhook)
-  deploy:
-    name: Deploy to Render
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Trigger Render Deploy Hook
+      - name: Pull Docker Images
         run: |
-          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
-            curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
-          else
-            echo "RENDER_DEPLOY_HOOK not configured, skipping deploy"
-          fi
+          docker pull ${{ env.DOCKER_IMAGE_BACKEND }}:${{ github.sha }}
+          docker pull ${{ env.DOCKER_IMAGE_MARKET }}:${{ github.sha }}
+
+      # WHY: Start containers and verify they respond correctly
+      - name: Start Market Engine Container
+        run: |
+          docker run -d --name market-engine \
+            -p 5000:5000 \
+            ${{ env.DOCKER_IMAGE_MARKET }}:${{ github.sha }}
+          sleep 10
+
+      - name: Verify Market Engine Health
+        run: |
+          curl -f http://localhost:5000/health || exit 1
+          echo "✅ Market Engine health check passed"
+
+      - name: Start Backend Container
+        run: |
+          docker run -d --name backend \
+            -p 8080:8080 \
+            -e SPRING_PROFILES_ACTIVE=test \
+            -e MARKET_SERVICE_URL=http://host.docker.internal:5000 \
+            ${{ env.DOCKER_IMAGE_BACKEND }}:${{ github.sha }}
+          sleep 15
+
+      - name: Verify Backend Health
+        run: |
+          curl -f http://localhost:8080/api/health || exit 1
+          echo "✅ Backend health check passed"
+
+      # WHY: Clean up containers after testing
+      - name: Cleanup Containers
+        if: always()
+        run: |
+          docker stop backend market-engine || true
+          docker rm backend market-engine || true
