@@ -1,0 +1,63 @@
+# Docker Compose for Algorithmic Portfolio Manager
+# Orchestrates all services for local development
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: apm-postgres
+    environment:
+      POSTGRES_DB: portfoliodb
+      POSTGRES_USER: apm_user
+      POSTGRES_PASSWORD: apm_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apm_user -d portfoliodb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Python Market Engine
+  market-engine:
+    build:
+      context: ./market-engine
+      dockerfile: Dockerfile
+    container_name: apm-market-engine
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Java Spring Boot Backend
+  backend:
+    build:
+      context: ./backend-java
+      dockerfile: Dockerfile
+    container_name: apm-backend
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/portfoliodb
+      DB_USERNAME: apm_user
+      DB_PASSWORD: apm_password
+      DB_DRIVER: org.postgresql.Driver
+      HIBERNATE_DIALECT: org.hibernate.dialect.PostgreSQLDialect
+      MARKET_SERVICE_URL: http://market-engine:5000
+      H2_CONSOLE_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      market-engine:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

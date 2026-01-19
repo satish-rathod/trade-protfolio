@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: portfolio-manager
+
+  # Database Configuration
+  datasource:
+    url: ${DB_URL:jdbc:h2:mem:portfoliodb}
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
+    driver-class-name: ${DB_DRIVER:org.h2.Driver}
+
+  # JPA Configuration
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: ${HIBERNATE_DIALECT:org.hibernate.dialect.H2Dialect}
+        format_sql: true
+
+  # H2 Console (for local development)
+  h2:
+    console:
+      enabled: ${H2_CONSOLE_ENABLED:true}
+      path: /h2-console
+
+# Server Configuration
+server:
+  port: 8080
+
+# Market Engine Service URL
+market:
+  service:
+    url: ${MARKET_SERVICE_URL:http://localhost:5000}
+
+# Logging
+logging:
+  level:
+    com.apm: INFO
+    org.springframework: WARN

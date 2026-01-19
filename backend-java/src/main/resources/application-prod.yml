@@ -1,0 +1,58 @@
+# Production Configuration for Neon PostgreSQL
+# Activate this profile with: --spring.profiles.active=prod
+# Or set environment variable: SPRING_PROFILES_ACTIVE=prod
+
+spring:
+  application:
+    name: portfolio-manager
+
+  # Neon PostgreSQL Database Configuration
+  # Set these environment variables in your deployment:
+  #   DATABASE_URL: postgresql://username:password@host.neon.tech/dbname?sslmode=require
+  #   DB_USERNAME: your-neon-username
+  #   DB_PASSWORD: your-neon-password
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/portfoliodb}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 30000
+      maximum-pool-size: 5
+      minimum-idle: 2
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # JPA Configuration for PostgreSQL
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          lob:
+            non_contextual_creation: true
+
+  # Disable H2 Console in production
+  h2:
+    console:
+      enabled: false
+
+# Server Configuration
+server:
+  port: ${PORT:8080}
+
+# Market Engine Service URL
+market:
+  service:
+    url: ${MARKET_SERVICE_URL:http://localhost:5000}
+
+# Logging (less verbose in production)
+logging:
+  level:
+    com.apm: INFO
+    org.springframework: WARN
+    org.hibernate: WARN
