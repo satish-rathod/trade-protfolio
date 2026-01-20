@@ -51,6 +51,7 @@ jobs:
         with:
           name: dependency-check-report
           path: backend-java/target/dependency-check-report.html
+          if-no-files-found: ignore
 
   # ============================================
   # Stage 2: Python Market Engine - Lint & Test
