@@ -359,47 +359,6 @@ HEALTHCHECK --interval=30s --timeout=3s \
 
 ---
 
-## 7. Limitations & Improvements
-
-### 7.1 Current Limitations
-
-| Limitation | Impact |
-|------------|--------|
-| **No Secrets Rotation** | DockerHub tokens are static |
-| **Limited Test Coverage** | Some edge cases not covered |
-| **No Blue-Green Deployment** | Single deployment strategy |
-| **Manual Production Deploy** | Requires webhook trigger |
-| **No Performance Testing** | Load testing not integrated |
-
-### 7.2 Proposed Improvements
-
-#### Short-Term (1-2 Sprints)
-- [ ] Add JaCoCo coverage threshold enforcement (e.g., 80% minimum)
-- [ ] Implement Slack/Discord notifications for pipeline failures
-- [ ] Add integration tests with Testcontainers
-- [ ] Configure branch protection rules
-
-#### Medium-Term (1-2 Months)
-- [ ] Implement ArgoCD for GitOps-style deployment
-- [ ] Add Prometheus/Grafana for monitoring
-- [ ] Implement feature flag management
-- [ ] Add load testing with k6 or JMeter
-
-#### Long-Term (Future Roadmap)
-- [ ] Multi-environment deployment (dev/staging/prod)
-- [ ] Implement canary deployments
-- [ ] Add infrastructure as code (Terraform)
-- [ ] Implement service mesh (Istio) for microservice communication
-
-### 7.3 Lessons Learned
-
-1. **Fail-Fast Philosophy:** Running cheap checks first saves significant CI minutes
-2. **Caching is Critical:** Maven/pip caching reduced build times by 40%
-3. **Security is a Journey:** Start with SAST/SCA, add more layers incrementally
-4. **Documentation Matters:** Clear README and inline comments speed up onboarding
-
----
-
 ## Appendix A: How to Run Locally
 
 ### Prerequisites
@@ -474,5 +433,3 @@ The CI pipeline (`ci.yml`) is organized into 6 parallel/sequential jobs:
 Total estimated runtime: **8-12 minutes**
 
 ---
-
-*Report generated for DevOps CI/CD Project Submission*
