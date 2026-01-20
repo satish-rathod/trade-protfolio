@@ -3,7 +3,7 @@
 
 **Course:** Software Systems & Technologies (SST)  
 **Submission Date:** January 2026  
-**Project Repository:** https://github.com/[your-username]/trade-portfolio
+**Project Repository:** https://github.com/[satish-rathod]/trade-portfolio
 
 ---
 
@@ -409,7 +409,7 @@ HEALTHCHECK --interval=30s --timeout=3s \
 ### Quick Start
 ```bash
 # Clone the repository
-git clone https://github.com/[your-username]/trade-portfolio.git
+git clone https://github.com/[satish-rathod]/trade-portfolio.git
 cd trade-portfolio
 
 # Start all services
