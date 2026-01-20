@@ -14,7 +14,6 @@
 4. [CI/CD Pipeline Design & Stages](#4-cicd-pipeline-design--stages)
 5. [Security & Quality Controls](#5-security--quality-controls)
 6. [Results & Observations](#6-results--observations)
-7. [Limitations & Improvements](#7-limitations--improvements)
 
 ---
 
